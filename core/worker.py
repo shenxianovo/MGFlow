@@ -59,6 +59,7 @@ class Worker:
     async def _execute_tool(self, fn_name: str, fn_args: dict) -> dict:
         t = get_tool(fn_name)
         try:
+            fn_args["project_dir"] = str(self.project_dir)
             return await t.execute(**fn_args)
         except Exception as e:
             return {"error": f"工具执行失败: {e}"}
@@ -70,7 +71,10 @@ class Worker:
         await self.blackboard.set_running(self.node_name)
 
         try:
-            result = await self._run_loop(user_input)
+            if self.node_def.deterministic:
+                result = await self._run_deterministic()
+            else:
+                result = await self._run_loop(user_input)
             await self.blackboard.set_done(self.node_name, result)
             await self.event_bus.emit(
                 WORKER_COMPLETED,
@@ -85,6 +89,27 @@ class Worker:
                 {"node": self.node_name, "error": error_msg},
             )
             raise
+
+    async def _run_deterministic(self) -> dict:
+        from renderer.compiler import compile_html
+
+        ir_data = self.blackboard.get_output("motion_design")
+        sound = self.blackboard.get_output("sound_design")
+        if sound and sound.get("audio_path"):
+            ir_data["audio_path"] = sound["audio_path"]
+
+        output_dir = self.project_dir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        import uuid
+        output_path = output_dir / f"mg_{uuid.uuid4().hex[:8]}.html"
+        compile_html(ir_data, str(output_path))
+
+        await self.event_bus.emit(
+            WORKER_PROGRESS,
+            {"node": self.node_name, "message": f"渲染完成: {output_path.name}"},
+        )
+        return {"html_path": str(output_path), "title": ir_data.get("title", "")}
 
     async def _run_loop(self, user_input: str) -> dict:
         dep_context = self._build_dependency_context()
