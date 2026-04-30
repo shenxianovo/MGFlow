@@ -120,7 +120,7 @@ class Orchestrator:
         self.project_dir = Path(project_dir)
         self.event_bus = event_bus
         self.llm = llm or LLMClient()
-        self.blackboard = Blackboard(self.project_dir)
+        self.blackboard = Blackboard(self.project_dir, event_bus=self.event_bus)
         self.messages: list[dict] = []
         self._initialized = False
 

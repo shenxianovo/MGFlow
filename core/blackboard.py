@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .events import get_event_bus, NODE_STATE_CHANGED
+from .events import EventBus, NODE_STATE_CHANGED
 from .node import get_all_nodes, get_downstream
 
 VALID_TRANSITIONS = {
@@ -18,10 +18,11 @@ VALID_TRANSITIONS = {
 
 
 class Blackboard:
-    def __init__(self, project_dir: Path) -> None:
+    def __init__(self, project_dir: Path, event_bus: EventBus | None = None) -> None:
         self.project_dir = project_dir
         self.project_dir.mkdir(parents=True, exist_ok=True)
         self._path = project_dir / "blackboard.json"
+        self._event_bus = event_bus
 
     def load(self) -> dict[str, Any]:
         if not self._path.exists():
@@ -82,24 +83,27 @@ class Blackboard:
 
     async def set_running(self, node_name: str) -> None:
         self._transition(node_name, "running", error=None)
-        await get_event_bus().emit(
-            NODE_STATE_CHANGED,
-            {"node": node_name, "status": "running"},
-        )
+        if self._event_bus:
+            await self._event_bus.emit(
+                NODE_STATE_CHANGED,
+                {"node": node_name, "status": "running"},
+            )
 
     async def set_done(self, node_name: str, output: Any) -> None:
         self._transition(node_name, "done", output=output, error=None)
-        await get_event_bus().emit(
-            NODE_STATE_CHANGED,
-            {"node": node_name, "status": "done"},
-        )
+        if self._event_bus:
+            await self._event_bus.emit(
+                NODE_STATE_CHANGED,
+                {"node": node_name, "status": "done"},
+            )
 
     async def set_failed(self, node_name: str, error: str) -> None:
         self._transition(node_name, "failed", error=error)
-        await get_event_bus().emit(
-            NODE_STATE_CHANGED,
-            {"node": node_name, "status": "failed", "error": error},
-        )
+        if self._event_bus:
+            await self._event_bus.emit(
+                NODE_STATE_CHANGED,
+                {"node": node_name, "status": "failed", "error": error},
+            )
 
     async def invalidate_downstream(self, node_name: str) -> list[str]:
         downstream = get_downstream(node_name)
@@ -113,10 +117,11 @@ class Blackboard:
                 invalidated.append(name)
         self.save(data)
         for name in invalidated:
-            await get_event_bus().emit(
-                NODE_STATE_CHANGED,
-                {"node": name, "status": "stale"},
-            )
+            if self._event_bus:
+                await self._event_bus.emit(
+                    NODE_STATE_CHANGED,
+                    {"node": name, "status": "stale"},
+                )
         return invalidated
 
     def get_ready_nodes(self) -> list[str]:
