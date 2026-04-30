@@ -10,6 +10,7 @@ from .events import (
     WORKER_COMPLETED,
     WORKER_FAILED,
     WORKER_PROGRESS,
+    WORKER_TOKEN,
 )
 from .llm import LLMClient
 from .node import get_node, get_all_nodes
@@ -140,39 +141,81 @@ class Worker:
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
 
-            resp = await self.llm.chat(**kwargs)
-            choice = resp.choices[0]
-            message = choice.message
+            content, tool_calls = await self._stream_response(**kwargs)
 
-            if message.content:
+            if content:
                 await self.event_bus.emit(
                     WORKER_PROGRESS,
-                    {
-                        "node": self.node_name,
-                        "message": message.content[:200],
-                    },
+                    {"node": self.node_name, "message": content[:200]},
                 )
 
-            if not message.tool_calls:
-                return self._parse_output(message.content or "")
+            if not tool_calls:
+                return self._parse_output(content)
 
-            messages.append(message)
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": content or None}
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                }
+                for tc in tool_calls
+            ]
+            messages.append(assistant_msg)
 
-            for tool_call in message.tool_calls:
-                fn_name = tool_call.function.name
+            for tc in tool_calls:
+                fn_name = tc["name"]
                 try:
-                    fn_args = json.loads(tool_call.function.arguments)
+                    fn_args = json.loads(tc["arguments"])
                 except json.JSONDecodeError:
                     fn_args = {}
 
                 result = await self._execute_tool(fn_name, fn_args)
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
+                    "tool_call_id": tc["id"],
                     "content": json.dumps(result, ensure_ascii=False),
                 })
 
-        return self._parse_output(messages[-1].get("content", "") if isinstance(messages[-1], dict) else "")
+        last = messages[-1]
+        return self._parse_output(last.get("content", "") if isinstance(last, dict) else "")
+
+    async def _stream_response(self, **kwargs: Any) -> tuple[str, list[dict]]:
+        content = ""
+        tool_calls_by_index: dict[int, dict] = {}
+
+        async for chunk in self.llm.chat_stream(**kwargs):
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta is None:
+                continue
+
+            if delta.content:
+                content += delta.content
+                await self.event_bus.emit(
+                    WORKER_TOKEN,
+                    {"node": self.node_name, "token": delta.content},
+                )
+
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_by_index:
+                        tool_calls_by_index[idx] = {
+                            "id": tc_delta.id or "",
+                            "name": "",
+                            "arguments": "",
+                        }
+                    entry = tool_calls_by_index[idx]
+                    if tc_delta.id:
+                        entry["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            entry["name"] += tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            entry["arguments"] += tc_delta.function.arguments
+
+        tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index)]
+        return content, tool_calls
 
     def _parse_output(self, content: str) -> dict:
         content = content.strip()

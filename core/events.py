@@ -9,6 +9,7 @@ WORKER_COMPLETED = "worker_completed"
 WORKER_FAILED = "worker_failed"
 WORKER_NEED_INPUT = "worker_need_input"
 WORKER_PROGRESS = "worker_progress"
+WORKER_TOKEN = "worker_token"
 NODE_STATE_CHANGED = "node_state_changed"
 ORCHESTRATOR_MESSAGE = "orchestrator_message"
 

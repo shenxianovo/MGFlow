@@ -143,29 +143,66 @@ class Orchestrator:
 
         max_rounds = 30
         for _ in range(max_rounds):
-            resp = await self.llm.chat(
+            content = ""
+            tool_calls_by_index: dict[int, dict] = {}
+
+            async for chunk in self.llm.chat_stream(
                 messages=self.messages,
                 tools=META_TOOLS,
                 max_tokens=4000,
-            )
-            choice = resp.choices[0]
-            message = choice.message
+            ):
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta is None:
+                    continue
 
-            if message.content:
-                yield {"type": "orchestrator_message", "message": message.content}
+                if delta.content:
+                    content += delta.content
+                    yield {"type": "orchestrator_token", "token": delta.content}
+
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_calls_by_index:
+                            tool_calls_by_index[idx] = {
+                                "id": tc_delta.id or "",
+                                "name": "",
+                                "arguments": "",
+                            }
+                        entry = tool_calls_by_index[idx]
+                        if tc_delta.id:
+                            entry["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                entry["name"] += tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                entry["arguments"] += tc_delta.function.arguments
+
+            if content:
+                yield {"type": "orchestrator_message", "message": content}
                 await self.event_bus.emit(
-                    ORCHESTRATOR_MESSAGE, {"message": message.content}
+                    ORCHESTRATOR_MESSAGE, {"message": content}
                 )
 
-            if not message.tool_calls:
+            tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index)]
+
+            if not tool_calls:
                 return
 
-            self.messages.append(message)
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": content or None}
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                }
+                for tc in tool_calls
+            ]
+            self.messages.append(assistant_msg)
 
-            for tool_call in message.tool_calls:
-                fn_name = tool_call.function.name
+            for tc in tool_calls:
+                fn_name = tc["name"]
                 try:
-                    fn_args = json.loads(tool_call.function.arguments)
+                    fn_args = json.loads(tc["arguments"])
                 except json.JSONDecodeError:
                     fn_args = {}
 
@@ -180,7 +217,7 @@ class Orchestrator:
 
                 self.messages.append({
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
+                    "tool_call_id": tc["id"],
                     "content": json.dumps(result, ensure_ascii=False),
                 })
 

@@ -93,15 +93,26 @@ async def chat(project_id: str, req: ChatRequest):
     async def on_worker_progress(data: dict):
         await queue.put({"event": "worker_progress", "data": data})
 
-    from core.events import NODE_STATE_CHANGED, WORKER_PROGRESS
+    async def on_worker_token(data: dict):
+        await queue.put({"event": "worker_token", "data": data})
+
+    from core.events import NODE_STATE_CHANGED, WORKER_PROGRESS, WORKER_TOKEN
     event_bus.subscribe(NODE_STATE_CHANGED, on_node_state)
     event_bus.subscribe(WORKER_PROGRESS, on_worker_progress)
+    event_bus.subscribe(WORKER_TOKEN, on_worker_token)
 
     async def generate():
         try:
             async for event in orch.run(req.message):
                 etype = event.get("type", "")
-                if etype == "orchestrator_message":
+                if etype == "orchestrator_token":
+                    yield {
+                        "event": "orchestrator_token",
+                        "data": json.dumps(
+                            {"token": event["token"]}, ensure_ascii=False
+                        ),
+                    }
+                elif etype == "orchestrator_message":
                     yield {
                         "event": "message",
                         "data": json.dumps(
@@ -139,6 +150,7 @@ async def chat(project_id: str, req: ChatRequest):
         finally:
             event_bus.unsubscribe(NODE_STATE_CHANGED, on_node_state)
             event_bus.unsubscribe(WORKER_PROGRESS, on_worker_progress)
+            event_bus.unsubscribe(WORKER_TOKEN, on_worker_token)
 
     return EventSourceResponse(generate())
 
