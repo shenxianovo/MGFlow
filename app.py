@@ -57,6 +57,29 @@ class ChatRequest(BaseModel):
 
 # --- Routes ---
 
+@app.get("/api/projects")
+async def list_projects():
+    projects = []
+    for d in sorted(PROJECTS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not d.is_dir():
+            continue
+        brief_path = d / "brief.txt"
+        brief = brief_path.read_text(encoding="utf-8").strip() if brief_path.exists() else ""
+        bb_path = d / "blackboard.json"
+        done_count = 0
+        total_count = 0
+        if bb_path.exists():
+            bb = json.loads(bb_path.read_text(encoding="utf-8"))
+            nodes = bb.get("nodes", {})
+            total_count = len(nodes)
+            done_count = sum(1 for n in nodes.values() if n.get("status") == "done")
+        projects.append({
+            "project_id": d.name,
+            "brief": brief[:80],
+            "progress": f"{done_count}/{total_count}",
+        })
+    return projects
+
 @app.post("/api/projects", response_model=CreateProjectResponse)
 async def create_project(req: CreateProjectRequest):
     project_id = uuid.uuid4().hex[:8]
@@ -180,7 +203,25 @@ async def preview(project_id: str):
     if not html_path.exists():
         raise HTTPException(404, f"HTML 文件不存在: {html_path}")
 
-    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+    html = html_path.read_text(encoding="utf-8")
+    artifacts_abs = str((session["project_dir"] / "artifacts").resolve())
+    html = html.replace(artifacts_abs.replace("\\", "\\\\"), "artifacts")
+    html = html.replace(artifacts_abs.replace("\\", "/"), "artifacts")
+    html = html.replace(artifacts_abs, "artifacts")
+    return HTMLResponse(html)
+
+
+@app.get("/api/projects/{project_id}/artifacts/{file_path:path}")
+async def serve_artifact(project_id: str, file_path: str):
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        raise HTTPException(404, f"项目 {project_id} 不存在")
+    artifact = (project_dir / "artifacts" / file_path).resolve()
+    if not str(artifact).startswith(str((project_dir / "artifacts").resolve())):
+        raise HTTPException(403, "路径越界")
+    if not artifact.exists():
+        raise HTTPException(404, f"文件不存在: {file_path}")
+    return FileResponse(artifact)
 
 
 STATIC_DIR = Path("static")

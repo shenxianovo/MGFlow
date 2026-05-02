@@ -123,10 +123,10 @@ def _escape_html(s: str) -> str:
 
 def _to_web_path(filepath: str) -> str:
     normalized = filepath.replace("\\", "/")
-    marker = "/assets/"
-    idx = normalized.rfind(marker)
-    if idx >= 0:
-        return normalized[idx:]
+    for marker in ("/artifacts/", "/assets/"):
+        idx = normalized.rfind(marker)
+        if idx >= 0:
+            return normalized[idx + 1:]  # strip leading slash → relative path
     return filepath
 
 
