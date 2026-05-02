@@ -320,6 +320,20 @@ function handleSSE(event, dataStr) {
           if (node === 'render' && data.result.status === 'completed') {
             loadPreview();
           }
+        } else if (data.tool === 'launch_workers') {
+          const results = data.result.results || [];
+          for (const r of results) {
+            if (r.status === 'completed') {
+              updateNode(r.node, 'done');
+              clearNodeStream(r.node);
+            } else if (r.status === 'failed') {
+              updateNode(r.node, 'failed');
+              clearNodeStream(r.node);
+            }
+            if (r.node === 'render' && r.status === 'completed') {
+              loadPreview();
+            }
+          }
         }
         break;
       case 'node_state':
