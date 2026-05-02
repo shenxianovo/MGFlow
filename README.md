@@ -2,6 +2,7 @@
 
 MG动画基本流程：
 
+```mermaid
 flowchart LR
     A[创意策划] -->|输出: 创意方向文档| B[脚本编写]
     A -->|输出: 创意方向文档| C[风格设定]
@@ -20,4 +21,4 @@ flowchart LR
 
     style A fill:#e1f5fe
     style H fill:#c8e6c9
-
+```

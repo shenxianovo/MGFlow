@@ -79,6 +79,17 @@ async def get_status(project_id: str):
     }
 
 
+@app.get("/api/projects/{project_id}/logs/{node_name}")
+async def get_node_log(project_id: str, node_name: str):
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        raise HTTPException(404, f"项目 {project_id} 不存在")
+    log_path = project_dir / "logs" / f"{node_name}.json"
+    if not log_path.exists():
+        raise HTTPException(404, f"节点 {node_name} 尚无执行日志")
+    return json.loads(log_path.read_text(encoding="utf-8"))
+
+
 @app.post("/api/projects/{project_id}/chat")
 async def chat(project_id: str, req: ChatRequest):
     session = _get_session(project_id)

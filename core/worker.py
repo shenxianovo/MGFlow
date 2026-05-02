@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .blackboard import Blackboard
@@ -70,12 +72,15 @@ class Worker:
             WORKER_STARTED, {"node": self.node_name}
         )
         await self.blackboard.set_running(self.node_name)
+        self._started_at = datetime.now(timezone.utc).isoformat()
+        self._log_messages: list[dict] = []
 
         try:
             if self.node_def.deterministic:
                 result = await self._run_deterministic()
             else:
                 result = await self._run_loop(user_input)
+            self._save_log("done")
             await self.blackboard.set_done(self.node_name, result)
             await self.event_bus.emit(
                 WORKER_COMPLETED,
@@ -84,12 +89,30 @@ class Worker:
             return result
         except Exception as e:
             error_msg = str(e)
+            self._save_log("failed", error=error_msg)
             await self.blackboard.set_failed(self.node_name, error_msg)
             await self.event_bus.emit(
                 WORKER_FAILED,
                 {"node": self.node_name, "error": error_msg},
             )
             raise
+
+    def _save_log(self, status: str, error: str | None = None) -> None:
+        logs_dir = Path(self.project_dir) / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_data = {
+            "node_name": self.node_name,
+            "started_at": self._started_at,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "messages": self._log_messages,
+        }
+        if error:
+            log_data["error"] = error
+        log_path = logs_dir / f"{self.node_name}.json"
+        log_path.write_text(
+            json.dumps(log_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     async def _run_deterministic(self) -> dict:
         from renderer.compiler import compile_html
@@ -126,6 +149,7 @@ class Worker:
             {"role": "system", "content": self.node_def.system_prompt},
             {"role": "user", "content": user_message},
         ]
+        self._log_messages = messages
         tool_schemas = self._build_tool_schemas()
 
         for iteration in range(self.node_def.max_iterations):
@@ -153,6 +177,7 @@ class Worker:
                 )
 
             if not tool_calls:
+                messages.append({"role": "assistant", "content": content})
                 return self._parse_output(content)
 
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": content or None}
