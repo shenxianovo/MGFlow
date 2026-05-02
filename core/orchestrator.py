@@ -231,7 +231,11 @@ class Orchestrator:
             node_name = fn_args["node_name"]
             output = fn_args["output"]
             try:
-                await self.blackboard.set_running(node_name)
+                status = self.blackboard.get_status(node_name)
+                if status == "done":
+                    await self.blackboard.invalidate_downstream(node_name)
+                if status not in ("running",):
+                    await self.blackboard.set_running(node_name)
                 await self.blackboard.set_done(node_name, output)
                 return {"status": "ok", "node": node_name}
             except Exception as e:

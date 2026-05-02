@@ -224,4 +224,12 @@ class Worker:
         try:
             return json.loads(content)
         except json.JSONDecodeError:
-            return {"raw_output": content}
+            pass
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end > start:
+            try:
+                return json.loads(content[start : end + 1])
+            except json.JSONDecodeError:
+                pass
+        return {"raw_output": content}

@@ -109,7 +109,7 @@ class Blackboard:
         downstream = get_downstream(node_name)
         data = self.load()
         invalidated = []
-        for name in downstream:
+        for name in [node_name] + list(downstream):
             node_data = data["nodes"].get(name)
             if node_data and node_data["status"] == "done":
                 node_data["status"] = "stale"
