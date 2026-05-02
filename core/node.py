@@ -16,6 +16,7 @@ class NodeDef:
     tools: list[str] = field(default_factory=list)
     system_prompt: str = ""
     max_iterations: int = 10
+    max_tokens: int = 16000
     deterministic: bool = False
 
 
@@ -29,6 +30,7 @@ def node(
     depends_on: list[str] | None = None,
     tools: list[str] | None = None,
     max_iterations: int = 10,
+    max_tokens: int = 16000,
     deterministic: bool = False,
 ):
     def decorator(cls: type[Node]) -> type[Node]:
@@ -38,6 +40,7 @@ def node(
             tools=tools or [],
             system_prompt=cls.system_prompt,
             max_iterations=max_iterations,
+            max_tokens=max_tokens,
             deterministic=deterministic,
         )
         _NODE_REGISTRY[name] = node_def

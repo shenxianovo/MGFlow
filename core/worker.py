@@ -137,7 +137,10 @@ class Worker:
                 },
             )
 
-            kwargs: dict[str, Any] = {"messages": messages}
+            kwargs: dict[str, Any] = {
+                "messages": messages,
+                "max_tokens": self.node_def.max_tokens,
+            }
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
 
