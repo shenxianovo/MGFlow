@@ -359,6 +359,11 @@ function handleSSE(event, dataStr) {
       }
       case 'worker_progress':
         break;
+      case 'worker_need_input': {
+        const label = NODE_LABELS[data.node] || data.node;
+        addMessage(`[${label}] ${data.question}`, 'system');
+        break;
+      }
       case 'error':
         finalizeStreamingBubble();
         addMessage('错误: ' + data.message, 'system');

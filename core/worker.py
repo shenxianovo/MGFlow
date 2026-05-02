@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ from .events import (
     WORKER_FAILED,
     WORKER_PROGRESS,
     WORKER_TOKEN,
+    WORKER_NEED_INPUT,
 )
 from .llm import LLMClient
 from .node import get_node, get_all_nodes
@@ -34,9 +36,29 @@ class Worker:
         self.event_bus = event_bus
         self.llm = llm or LLMClient()
         self.project_dir = project_dir or blackboard.project_dir
+        self._input_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._waiting_for_input = False
+
+    _ASK_TOOL_SCHEMA = {
+        "type": "function",
+        "function": {
+            "name": "ask_for_clarification",
+            "description": "向用户提问以获取更多信息。当你不确定某个细节时使用此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "要问用户的问题",
+                    },
+                },
+                "required": ["question"],
+            },
+        },
+    }
 
     def _build_tool_schemas(self) -> list[dict]:
-        schemas = []
+        schemas = [self._ASK_TOOL_SCHEMA]
         for tool_name in self.node_def.tools:
             t = get_tool(tool_name)
             schemas.append(t.to_function_schema())
@@ -60,12 +82,26 @@ class Worker:
         return "\n\n".join(parts)
 
     async def _execute_tool(self, fn_name: str, fn_args: dict) -> dict:
+        if fn_name == "ask_for_clarification":
+            question = fn_args.get("question", "")
+            self._waiting_for_input = True
+            await self.event_bus.emit(
+                WORKER_NEED_INPUT,
+                {"node": self.node_name, "question": question},
+            )
+            answer = await self._input_queue.get()
+            self._waiting_for_input = False
+            return {"answer": answer}
+
         t = get_tool(fn_name)
         try:
             fn_args["project_dir"] = str(self.project_dir)
             return await t.execute(**fn_args)
         except Exception as e:
             return {"error": f"工具执行失败: {e}"}
+
+    def provide_input(self, answer: str) -> None:
+        self._input_queue.put_nowait(answer)
 
     async def run(self, user_input: str = "") -> dict:
         await self.event_bus.emit(

@@ -130,10 +130,14 @@ async def chat(project_id: str, req: ChatRequest):
     async def on_worker_token(data: dict):
         await queue.put({"event": "worker_token", "data": data})
 
-    from core.events import NODE_STATE_CHANGED, WORKER_PROGRESS, WORKER_TOKEN
+    async def on_worker_need_input(data: dict):
+        await queue.put({"event": "worker_need_input", "data": data})
+
+    from core.events import NODE_STATE_CHANGED, WORKER_PROGRESS, WORKER_TOKEN, WORKER_NEED_INPUT
     event_bus.subscribe(NODE_STATE_CHANGED, on_node_state)
     event_bus.subscribe(WORKER_PROGRESS, on_worker_progress)
     event_bus.subscribe(WORKER_TOKEN, on_worker_token)
+    event_bus.subscribe(WORKER_NEED_INPUT, on_worker_need_input)
 
     async def generate():
         try:
@@ -185,6 +189,7 @@ async def chat(project_id: str, req: ChatRequest):
             event_bus.unsubscribe(NODE_STATE_CHANGED, on_node_state)
             event_bus.unsubscribe(WORKER_PROGRESS, on_worker_progress)
             event_bus.unsubscribe(WORKER_TOKEN, on_worker_token)
+            event_bus.unsubscribe(WORKER_NEED_INPUT, on_worker_need_input)
 
     return EventSourceResponse(generate())
 
