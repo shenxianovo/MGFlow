@@ -17,15 +17,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <style>
 *, *::before, *::after {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{ width: 100%; height: 100%; background: #000; overflow: hidden; font-family: {font_family}, "Microsoft YaHei", "PingFang SC", sans-serif; }}
+body {{ display: flex; align-items: center; justify-content: center; }}
+
+#mg-wrapper {{
+  flex-shrink: 0;
+  transform-origin: center center;
+}}
 
 #mg-container {{
   position: relative;
   width: 1280px; height: 720px;
-  margin: auto;
   overflow: hidden;
   background: {bg_color};
 }}
-body {{ display: flex; flex-direction: column; align-items: center; justify-content: center; }}
 
 .mg-scene {{
   position: absolute; inset: 0;
@@ -67,7 +71,7 @@ body {{ display: flex; flex-direction: column; align-items: center; justify-cont
 #mg-subtitle.visible {{ opacity: 1; }}
 
 #mg-controls {{
-  width: 1280px; margin: auto;
+  width: 1280px;
   display: flex; align-items: center; gap: 12px;
   padding: 10px 16px; background: #111; border-radius: 0 0 8px 8px;
 }}
@@ -83,7 +87,7 @@ body {{ display: flex; flex-direction: column; align-items: center; justify-cont
 #mg-time {{ color: #aaa; font-size: 13px; font-variant-numeric: tabular-nums; min-width: 90px; text-align: right; }}
 
 #mg-scene-bar {{
-  width: 1280px; margin: auto; display: flex; height: 22px; background: #1a1a1a; gap: 1px;
+  width: 1280px; display: flex; height: 22px; background: #1a1a1a; gap: 1px;
 }}
 .scene-dot {{
   height: 100%; display: flex; align-items: center; justify-content: center;
@@ -96,8 +100,10 @@ body {{ display: flex; flex-direction: column; align-items: center; justify-cont
 </head>
 <body>
 
-<div id="mg-container"></div>
-<div id="mg-subtitle"></div>
+<div id="mg-wrapper">
+<div id="mg-container">
+  <div id="mg-subtitle"></div>
+</div>
 <div id="mg-controls">
   <button id="btn-play">⏸</button>
   <div id="mg-progress-wrap" onclick="seekTo(event)">
@@ -106,6 +112,7 @@ body {{ display: flex; flex-direction: column; align-items: center; justify-cont
   <span id="mg-time">0:00 / 0:00</span>
 </div>
 <div id="mg-scene-bar"></div>
+</div>
 
 <script>
 window.__MG_IR_DATA__ = {ir_json};
@@ -126,7 +133,7 @@ def _to_web_path(filepath: str) -> str:
     for marker in ("/artifacts/", "/assets/"):
         idx = normalized.rfind(marker)
         if idx >= 0:
-            return normalized[idx + 1:]  # strip leading slash → relative path
+            return ".." + normalized[idx:]  # ../artifacts/xxx — correct for local file in output/
     return filepath
 
 

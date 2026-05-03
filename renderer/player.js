@@ -432,13 +432,11 @@ window.seekToScene = function(idx) {
 };
 
 function fitToWindow() {
+  const wrapper = document.getElementById('mg-wrapper');
   const sx = window.innerWidth / 1280;
   const sy = window.innerHeight / 760;
   const s = Math.min(sx, sy, 1);
-  document.body.style.transform = 'scale(' + s + ')';
-  document.body.style.transformOrigin = 'top center';
-  document.body.style.width = (100 / s) + '%';
-  document.body.style.height = (100 / s) + '%';
+  wrapper.style.transform = 'scale(' + s + ')';
 }
 window.addEventListener('resize', fitToWindow);
 fitToWindow();

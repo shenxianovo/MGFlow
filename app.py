@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import shutil
 import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -113,11 +115,124 @@ async def get_node_log(project_id: str, node_name: str):
     return json.loads(log_path.read_text(encoding="utf-8"))
 
 
+TEXT_EXTS = {".txt", ".md", ".json", ".csv", ".srt"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".flac", ".aac"}
+
+
+def _file_category(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext in TEXT_EXTS:
+        return "text"
+    if ext in IMAGE_EXTS:
+        return "image"
+    if ext in AUDIO_EXTS:
+        return "audio"
+    return "other"
+
+
+@app.post("/api/projects/{project_id}/upload")
+async def upload_files(project_id: str, files: list[UploadFile] = File(...)):
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        raise HTTPException(404, f"项目 {project_id} 不存在")
+
+    staging_dir = project_dir / "staging"
+    staging_dir.mkdir(exist_ok=True)
+
+    saved = []
+    for f in files:
+        content = await f.read()
+        dest = staging_dir / f.filename
+        dest.write_bytes(content)
+
+        category = _file_category(f.filename)
+        if category in ("image", "audio"):
+            artifacts_dir = project_dir / "artifacts"
+            artifacts_dir.mkdir(exist_ok=True)
+            shutil.copy2(dest, artifacts_dir / f.filename)
+
+        saved.append({
+            "filename": f.filename,
+            "category": category,
+            "size": len(content),
+        })
+
+    return {"files": saved}
+
+
+@app.get("/api/projects/{project_id}/staging")
+async def list_staging(project_id: str):
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        raise HTTPException(404, f"项目 {project_id} 不存在")
+
+    staging_dir = project_dir / "staging"
+    if not staging_dir.exists():
+        return {"files": []}
+
+    files = []
+    for f in sorted(staging_dir.iterdir()):
+        if f.is_file():
+            files.append({
+                "filename": f.name,
+                "category": _file_category(f.name),
+                "size": f.stat().st_size,
+            })
+    return {"files": files}
+
+
+def _resolve_file_refs(message: str, staging_dir: Path) -> str:
+    """Parse @filename references and inject file content."""
+    pattern = re.compile(r"@([\w\-\.]+\.\w+)")
+    matches = pattern.findall(message)
+    if not matches:
+        return message
+
+    appendix_parts = []
+    for filename in matches:
+        filepath = staging_dir / filename
+        if not filepath.exists():
+            continue
+        category = _file_category(filename)
+        if category == "text":
+            try:
+                text = filepath.read_text(encoding="utf-8")
+                if len(text) > 8000:
+                    text = text[:8000] + "\n...(内容已截断)"
+                appendix_parts.append(
+                    f"--- 附件: {filename} ---\n{text}\n--- 附件结束 ---"
+                )
+            except Exception:
+                appendix_parts.append(
+                    f"--- 附件: {filename} ---\n[无法读取文本内容]\n--- 附件结束 ---"
+                )
+        elif category == "image":
+            appendix_parts.append(
+                f"--- 附件: {filename} (图片文件, 已保存到 artifacts/{filename}) ---"
+            )
+        elif category == "audio":
+            appendix_parts.append(
+                f"--- 附件: {filename} (音频文件, 已保存到 artifacts/{filename}) ---"
+            )
+        else:
+            appendix_parts.append(
+                f"--- 附件: {filename} (文件类型: {Path(filename).suffix}) ---"
+            )
+
+    if appendix_parts:
+        return message + "\n\n" + "\n\n".join(appendix_parts)
+    return message
+
+
 @app.post("/api/projects/{project_id}/chat")
 async def chat(project_id: str, req: ChatRequest):
     session = _get_session(project_id)
     orch: Orchestrator = session["orchestrator"]
     event_bus: EventBus = session["event_bus"]
+
+    staging_dir = session["project_dir"] / "staging"
+    resolved_message = _resolve_file_refs(req.message, staging_dir)
 
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
@@ -141,7 +256,7 @@ async def chat(project_id: str, req: ChatRequest):
 
     async def generate():
         try:
-            async for event in orch.run(req.message):
+            async for event in orch.run(resolved_message):
                 etype = event.get("type", "")
                 if etype == "orchestrator_token":
                     yield {
@@ -209,10 +324,9 @@ async def preview(project_id: str):
         raise HTTPException(404, f"HTML 文件不存在: {html_path}")
 
     html = html_path.read_text(encoding="utf-8")
-    artifacts_abs = str((session["project_dir"] / "artifacts").resolve())
-    html = html.replace(artifacts_abs.replace("\\", "\\\\"), "artifacts")
-    html = html.replace(artifacts_abs.replace("\\", "/"), "artifacts")
-    html = html.replace(artifacts_abs, "artifacts")
+    api_prefix = f"/api/projects/{project_id}/artifacts/"
+    html = html.replace("../artifacts/", api_prefix)
+    html = html.replace("../assets/", api_prefix)
     return HTMLResponse(html)
 
 
