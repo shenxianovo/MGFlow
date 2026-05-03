@@ -182,46 +182,50 @@ async def list_staging(project_id: str):
     return {"files": files}
 
 
+@app.delete("/api/projects/{project_id}/staging/{filename}")
+async def delete_staging_file(project_id: str, filename: str):
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        raise HTTPException(404, f"项目 {project_id} 不存在")
+    filepath = (project_dir / "staging" / filename).resolve()
+    if not str(filepath).startswith(str((project_dir / "staging").resolve())):
+        raise HTTPException(403, "路径越界")
+    if not filepath.exists():
+        raise HTTPException(404, f"文件 {filename} 不存在")
+    filepath.unlink()
+    artifact = project_dir / "artifacts" / filename
+    if artifact.exists():
+        artifact.unlink()
+    return {"deleted": filename}
+
+
 def _resolve_file_refs(message: str, staging_dir: Path) -> str:
-    """Parse @filename references and inject file content."""
+    """Parse @filename references and build a lightweight file manifest for the Orchestrator."""
     pattern = re.compile(r"@([\w\-\.]+\.\w+)")
     matches = pattern.findall(message)
     if not matches:
         return message
 
-    appendix_parts = []
+    found = []
     for filename in matches:
         filepath = staging_dir / filename
         if not filepath.exists():
             continue
         category = _file_category(filename)
+        size = filepath.stat().st_size
         if category == "text":
-            try:
-                text = filepath.read_text(encoding="utf-8")
-                if len(text) > 8000:
-                    text = text[:8000] + "\n...(内容已截断)"
-                appendix_parts.append(
-                    f"--- 附件: {filename} ---\n{text}\n--- 附件结束 ---"
-                )
-            except Exception:
-                appendix_parts.append(
-                    f"--- 附件: {filename} ---\n[无法读取文本内容]\n--- 附件结束 ---"
-                )
+            size_str = f"{size}字节"
         elif category == "image":
-            appendix_parts.append(
-                f"--- 附件: {filename} (图片文件, 已保存到 artifacts/{filename}) ---"
-            )
+            size_str = f"{size // 1024}KB"
         elif category == "audio":
-            appendix_parts.append(
-                f"--- 附件: {filename} (音频文件, 已保存到 artifacts/{filename}) ---"
-            )
+            size_str = f"{size // 1024}KB"
         else:
-            appendix_parts.append(
-                f"--- 附件: {filename} (文件类型: {Path(filename).suffix}) ---"
-            )
+            size_str = f"{size}字节"
+        found.append(f"  - {filename} ({category}, {size_str}, 路径: staging/{filename})")
 
-    if appendix_parts:
-        return message + "\n\n" + "\n\n".join(appendix_parts)
+    if found:
+        manifest = "用户引用的暂存文件:\n" + "\n".join(found)
+        return message + "\n\n" + manifest
     return message
 
 

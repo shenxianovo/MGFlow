@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/pip list *)",
+      "Bash(.venv/Scripts/python -c \"import ast; ast.parse\\(open\\('app.py'\\).read\\(\\)\\); print\\('app.py: syntax OK'\\)\")"
+    ]
+  }
+}
